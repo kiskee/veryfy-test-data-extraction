@@ -1,11 +1,12 @@
 import os
 import re
 import veryfi
+import json
 
 
 class Read:
     multi = re.M
-    dic = {}
+    dic = []
     files = []
     client_id = "vrfiRtZobtTrwnPJay7EG8LXy8y1OnwIiovJZup"
     client_secret = "nuFKukMS8leUx1FAY44ddf4NnIn8l9lulA2HlNullmPFgFGb9pzgWSpl5cVYFfPN9NSm02LSfIVBLZSTEDrBJuCdLxgFW4pZkDzDEAVX9hYR5sbUg5M7D1jNSv37rNpH"
@@ -13,6 +14,10 @@ class Read:
     api_key = "91ca4d457eafdfea8cf42fad779d2625"
 
     def __init__(self, folder_path):
+        """
+
+        :param  folder_path:
+        """
         self.folder_path = folder_path
         self.client = veryfi.Client(self.client_id, self.client_secret, self.username, self.api_key)
 
@@ -33,20 +38,22 @@ class Read:
 
     def get_vendor_name(self, dic):
         orc_text = self.get_ocr_text(dic)
-        # regex = r"(?:THE\t)([\w ]*)(?:\t|\n)"
         regex = r"^([A-Z]{3,})(?:\t{1,}).+"
         try:
             result = re.findall(regex, orc_text, self.multi)
-            vendor_name = ' '.join(map(str, result[:4]))
+            vendor_name = ' '.join(map(str, result[:4])).strip()
         except IndexError:
             vendor_name = None
+
+        if vendor_name != 'THE AMERICAN TOBACCO COMPANY':
+            return None
         return vendor_name
 
     def get_bill_to_name(self, dic):
         orc_text = self.get_ocr_text(dic)
         regex = r"(?<=(?:ATTN|Atta):)([\w .]+)"
         try:
-            bill_to_name = re.findall(regex, orc_text)[0]
+            bill_to_name = re.findall(regex, orc_text)[0].strip()
         except IndexError:
             bill_to_name = None
         return bill_to_name
@@ -69,20 +76,19 @@ class Read:
         orc_text = self.get_ocr_text(dic)
         regex = r"(?<=(?:\t(?:ATTN|Atta)): )([\w .]+)$"
         try:
-            ship_to_name = re.findall(regex, orc_text, self.multi)[0]
+            ship_to_name = re.findall(regex, orc_text, self.multi)[0].strip()
         except IndexError:
             ship_to_name = None
         return ship_to_name
 
     def get_ship_to_address(self, dic):
-
         orc_text = self.get_ocr_text(dic)
         regex = r"(?:\t(\d.+)\s.+P\s)(.+\w{2}\s\d{5})$"
         try:
             response = re.findall(regex, orc_text, self.multi)
             formated_response = list(response[0])
             if len(formated_response) > 0:
-                ship_to_address = ' '.join(map(str, formated_response[:2]))
+                ship_to_address = ' '.join(map(str, formated_response[:2])).strip()
             else:
                 ship_to_address = None
         except IndexError:
@@ -94,7 +100,7 @@ class Read:
         regex = r"(?:PRICE$)(?:\n|.+\n)+\s^([\d,]+)(?:\t)"
 
         try:
-            line_items_quantity = re.findall(regex, orc_text, self.multi)[0]
+            line_items_quantity = re.findall(regex, orc_text, self.multi)[0].strip()
         except IndexError:
             line_items_quantity = None
         return line_items_quantity
@@ -102,44 +108,69 @@ class Read:
     def get_quantity_and_price(self, dic):
         orc_text = self.get_ocr_text(dic)
         regex = r"(?:PRICE$)(?:\n|.+\n)+\s^([\d,]+)(?:\t.+)\$([\d.]+) (?:each|ea)"
-        result = re.search(regex, orc_text, self.multi)
-        return list(result.groups())
+        try:
+            result = re.search(regex, orc_text, self.multi)
+            if result is not None:
+                result = result.groups()
+            else:
+                result = None
+        except IndexError:
+            result = None
+        return result
 
     def get_item_description(self, dic):
         orc_text = self.get_ocr_text(dic)
         regex = r"\t+(.+)\t+\$.+(?:each|ea)\n((.+\s)+)(?:.$\n|^(?:\n|\t))"
         result = re.search(regex, orc_text, self.multi)
-        groups = result.groups()
-        res = ' '.join(map(str, groups[:2]))
-        return res
+        if result is not None:
+            groups = result.groups()
+            res = ' '.join(map(str, groups[:2]))
+            clean = str(res).replace('\n', '').replace('\t', '').replace('"', "")
+        else:
+            clean = None
+        return clean
 
     def create_line_items(self, dic):
-
         q_and_p = self.get_quantity_and_price(dic)
-        description = f"Description : {self.get_item_description(dic)}"
-        line_items = [f'quantity: {q_and_p[0]}', description, f'price: {q_and_p[1]}']
-        return line_items
+        description = self.get_item_description(dic)
+        new_dic = {}
+        if q_and_p is not None and description is not None:
+            new_dic['quantity'] = q_and_p[0].strip()
+            new_dic['Description'] = description.strip()
+            new_dic['price'] = q_and_p[1].strip()
+        else:
+            new_dic = None
+        return new_dic
 
     def create_json_return(self, dic):
+        vendor_name = self.get_vendor_name(dic)
+        if vendor_name is not None:
+            json_return = {'vendor_name': self.get_vendor_name(dic), 'bill_to_name': self.get_bill_to_name(dic),
+                           'bill_to_address': self.get_bill_to_address(dic), 'ship_to_name': self.get_ship_to_name(dic),
+                           'ship_to_address': self.get_ship_to_address(dic), 'line_items': self.create_line_items(dic)}
+        else:
+            json_return = {'Error': 'The file dont match with format needed'}
+        return json.dumps(json_return)
 
-        return {
-            'vendor_name': self.get_vendor_name(dic),
-            'bill_to_name': self.get_bill_to_name(dic),
-            'bill_to_address': self.get_bill_to_address(dic),
-            'ship_to_name': self.get_ship_to_name(dic),
-            'ship_to_address': self.get_ship_to_address(dic),
-            'line_items': self.create_line_items(dic)
-        }
+    def process_files(self):
+        file_paths = []
+        set_of_dic = []
+        for item in self.get_file_names():
+            path = f"{self.folder_path}{item}"
+            file_paths.append(path)
+        for file in file_paths:
+            dic = self.client.process_document(file)
+            set_of_dic.append(dic)
+        self.dic = set_of_dic
 
-    # def get_json_from_file(self):
-    #
-    #     self.dic = self.client.process_document(self.file)
-    #     return self.dic
+        return set_of_dic
 
+    def get_all_data_from_file(self):
+        self.process_files()
+        for file in self.dic:
+            print(self.create_json_return(file))
 
 
 if __name__ == "__main__":
     invo = Read('../files/')
-
-    # dic = input("Ingresa tu dic: ")
-    print(invo.get_file_names())
+    invo.get_all_data_from_file()
