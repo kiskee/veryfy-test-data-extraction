@@ -40,13 +40,7 @@ class Read:
          the names of the files to be scanned.
         :return: (list) with all names of files in the folder
         """
-
-        file_names = []
-        for filename in os.listdir(self.folder_path):
-            file_path = os.path.join(self.folder_path, filename)
-            # Check is the file_path is a file
-            if os.path.isfile(file_path):
-                file_names.append(filename)
+        file_names = os.listdir(self.folder_path)
         self.files = file_names
         return file_names
 
@@ -110,15 +104,14 @@ class Read:
         orc_text = self.get_ocr_text(dic)
         # Regular expresion to get the bill_to_address in the ocr_text
         regex = r"(.+(?:Street|Avenue).+\s.+\s|.+\s)(.+\, \w{2} \d{5})"
-        try:
-            result = re.findall(regex, orc_text, self.multi)
+        result = re.findall(regex, orc_text, self.multi)
+        if len(result) > 0:
             # We need to clean the result of the search due to having some characters that we don't need
             formated_list = list(result[0])
             line1 = formated_list[0].split('\t\t')[0].split('\n')[0].replace('P	', '')
-            bill_to_address = f"{line1} {formated_list[1]}"
-        except IndexError:
-            bill_to_address = None
-        return bill_to_address
+            return f"{line1} {formated_list[1]}"
+        else:
+            return None
 
     def get_ship_to_name(self, dic):
         """
@@ -194,12 +187,13 @@ class Read:
         """
         orc_text = self.get_ocr_text(dic)
         # Regular expresion to get the description in the ocr_text
-        regex = r"\t+(.+)\t+\$.+(?:each|ea)\n((.+\s)+)(?:.$\n|^(?:\n|\t))"
+        regex = r"PRICE([\n\d\w\D]*)(\n\d[\d,]+)(.+\s+)\$.+(?:each|ea)\n((.+\s)+)(?:.$\n|^(?:\n|\t))"
         result = re.search(regex, orc_text, self.multi)
         # Validate if the result is not None
         if result is not None:
             groups = result.groups()
-            res = ' '.join(map(str, groups[:2]))
+            ne = [groups[0].strip(), groups[2].strip(), groups[3].strip()]
+            res = ' '.join(ne)
             clean = str(res).replace('\n', '').replace('\t', '').replace('"', "")
         else:
             clean = None
